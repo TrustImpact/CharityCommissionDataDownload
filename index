@@ -1,0 +1,149 @@
+# This is a python script for downloading and combining tables from the Charity Commission data into a simple CSV file. 
+# Including the latest income, expenditure, reserves, and salaries for all 168k charities.
+# Don't forget to change the file name and path @ row 141!
+
+
+import json
+import pandas as pd
+import requests
+import zipfile
+import io
+import tempfile
+import shutil
+
+def download_and_extract(url):
+    """ Download and extract a ZIP file from a URL. """
+    response = requests.get(url)
+    if response.status_code == 200:
+        # Create a named temporary directory that persists beyond the with block
+        temp_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(io.BytesIO(response.content)) as thezip:
+            thezip.extractall(temp_dir)
+            file_path = temp_dir + "/" + thezip.namelist()[0]
+            print("Extracted file path:", file_path)
+            return file_path, temp_dir  # Return the temp_dir for cleanup later
+    else:
+        raise Exception(f"Failed to download file from {url}")
+
+def load_reserves(file_path):
+    """ Load reserves, unrestricted funds, and restricted funds data from the annual_return_partb file. """
+    with open(file_path, 'r', encoding='utf-8-sig') as file:
+        data = json.load(file)
+
+    reserves_dict = {}
+    for entry in data:
+        charity_number = entry.get('registered_charity_number')
+        reserves = entry.get('reserves')
+        funds_unrestricted = entry.get('funds_unrestricted')
+        funds_restricted = entry.get('funds_restricted')
+        if charity_number:
+            reserves_dict[charity_number] = {
+                'reserves': reserves,
+                'funds_unrestricted': funds_unrestricted,
+                'funds_restricted': funds_restricted
+            }
+
+    return reserves_dict
+
+def extract_charities(file_path, reserves_data_dict, additional_data_dict):
+    with open(file_path, 'r', encoding='utf-8-sig') as file:
+        data = json.load(file)
+
+    charities = []
+    for charity in data:
+        charity_name = charity.get('charity_name', '')
+        charity_number = charity.get('registered_charity_number')
+        charity_type = charity.get('charity_type')
+        charity_registration_status = charity.get('charity_registration_status')
+        latest_income = charity.get('latest_income')
+        latest_expenditure = charity.get('latest_expenditure')
+        reserves_info = reserves_data_dict.get(charity_number, {})
+        reserves = reserves_info.get('reserves')
+        funds_unrestricted = reserves_info.get('funds_unrestricted')
+        funds_restricted = reserves_info.get('funds_restricted')
+
+        if charity_name and charity_number:
+            charities.append({
+                'Charity Name': charity_name,
+                'Charity Number': charity_number,
+                'Charity Type': charity_type,
+                'Charity Registration Status': charity_registration_status,
+                'Latest Income': latest_income,
+                'Latest Expenditure': latest_expenditure,
+                'Reserves': reserves,
+                'Funds Unrestricted': funds_unrestricted,
+                'Funds Restricted': funds_restricted
+            })
+
+    return charities
+
+
+def load_additional_data(file_path):
+    """ Load additional data from the new file. """
+    with open(file_path, 'r', encoding='utf-8-sig') as file:
+        data = json.load(file)
+
+    additional_data_dict = {}
+    for entry in data:
+        charity_number = entry.get('registered_charity_number')
+        additional_fields = {
+            'count_salary_band_60001_70000': entry.get('count_salary_band_60001_70000'),
+            'count_salary_band_70001_80000': entry.get('count_salary_band_70001_80000'),
+            'count_salary_band_80001_90000': entry.get('count_salary_band_80001_90000'),
+            'count_salary_band_90001_100000': entry.get('count_salary_band_90001_100000'),
+            'count_salary_band_100001_110000': entry.get('count_salary_band_100001_110000'),
+            'count_salary_band_110001_120000': entry.get('count_salary_band_110001_120000'),
+            'count_salary_band_120001_130000': entry.get('count_salary_band_120001_130000'),
+            'count_salary_band_130001_140000': entry.get('count_salary_band_130001_140000'),
+            'count_salary_band_140001_150000': entry.get('count_salary_band_140001_150000'),
+            'count_salary_band_150001_200000': entry.get('count_salary_band_150001_200000'),
+            'count_salary_band_200001_250000': entry.get('count_salary_band_200001_250000'),
+            'count_salary_band_250001_300000': entry.get('count_salary_band_250001_300000'),
+            'count_salary_band_300001_350000': entry.get('count_salary_band_300001_350000'),
+            'count_salary_band_350001_400000': entry.get('count_salary_band_350001_400000'),
+            'count_salary_band_400001_450000': entry.get('count_salary_band_400001_450000'),
+            'count_salary_band_450001_500000': entry.get('count_salary_band_450001_500000'),
+            'count_salary_band_over_500000': entry.get('count_salary_band_over_500000')
+        }
+        if charity_number:
+            additional_data_dict[charity_number] = additional_fields
+
+    return additional_data_dict
+
+# URLs
+charity_file_url = 'https://ccewuksprdoneregsadata1.blob.core.windows.net/data/json/publicextract.charity.zip'
+annual_return_url = 'https://ccewuksprdoneregsadata1.blob.core.windows.net/data/json/publicextract.charity_annual_return_partb.zip'
+additional_data_url = 'https://ccewuksprdoneregsadata1.blob.core.windows.net/data/json/publicextract.charity_annual_return_parta.zip'
+
+# Load reserves data (Part B)
+file_path, temp_dir1 = download_and_extract(annual_return_url)
+reserves_dict = load_reserves(file_path)
+
+# Load and process additional data (Part A)
+file_path, temp_dir3 = download_and_extract(additional_data_url)
+additional_data_dict = load_additional_data(file_path)
+
+# Extract charity data
+file_path, temp_dir2 = download_and_extract(charity_file_url)
+charity_data = extract_charities(file_path, reserves_dict, additional_data_dict)
+
+# Load and merge additional data
+file_path, temp_dir3 = download_and_extract(additional_data_url)
+additional_data_dict = load_additional_data(file_path)
+additional_data_df = pd.DataFrame.from_dict(additional_data_dict, orient='index').reset_index()
+additional_data_df.columns = ['Charity Number'] + list(additional_data_df.columns)[1:]
+
+# Merge with existing data
+charities_df = pd.DataFrame(charity_data)
+charities_df = pd.merge(charities_df, additional_data_df, on='Charity Number', how='left')
+
+# Save to CSV file
+output_file_path = '/Path/to/where/you/want/to/store/filename.csv'
+charities_df.to_csv(output_file_path, index=False)
+
+print(f"Data saved to {output_file_path}")
+
+# Clean up the temporary directories
+shutil.rmtree(temp_dir1)
+shutil.rmtree(temp_dir2)
+shutil.rmtree(temp_dir3)
